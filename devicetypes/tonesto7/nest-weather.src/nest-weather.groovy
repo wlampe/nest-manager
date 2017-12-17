@@ -12,7 +12,7 @@ import java.text.SimpleDateFormat
 
 preferences {  }
 
-def devVer() { return "5.1.3" }
+def devVer() { return "5.3.0" }
 
 metadata {
 	definition (name: "${textDevName()}", namespace: "tonesto7", author: "Anthony S.") {
@@ -108,10 +108,15 @@ metadata {
 		valueTile("devTypeVer", "device.devTypeVer", width: 2, height: 1, decoration: "flat") {
 			state("default", label: 'Device Type:\nv${currentValue}')
 		}
+		valueTile("remind", "device.blah", inactiveLabel: false, width: 6, height: 2, decoration: "flat", wordWrap: true) {
+			state("default", label: 'Reminder:\nHTML Content is Available in SmartApp')
+		}
 		htmlTile(name:"weatherHTML", action: "getWeatherHTML", width: 6, height: 16, whitelist: ["www.gstatic.com", "raw.githubusercontent.com", "cdn.rawgit.com"])
-
+		valueTile("remind", "device.blah", inactiveLabel: false, width: 6, height: 2, decoration: "flat", wordWrap: true) {
+			state("default", label: 'Reminder:\nHTML Content is Available in SmartApp')
+		}
 		main ("temp2")
-		details ("weatherHTML", "refresh")
+		details ("weatherHTML", "remind", "refresh")
 	}
 	preferences {
 		input "resetHistoryOnly", "bool", title: "Reset History Data", description: "", displayDuringSetup: false
@@ -170,6 +175,7 @@ def initialize() {
 		state.updatedLastRanAt = now()
 		verifyHC()
 		getWAlertFilters()
+		if(state?.shortcutAppId) { parent?.updShortcutAppId(atomicState?.shortcutAppId) }
 	} else {
 		log.trace "initialize(): Ran within last 2 seconds - SKIPPING"
 	}
@@ -235,13 +241,15 @@ def keepAwakeEvent() {
 
 void repairHealthStatus(data) {
 	Logger("repairHealthStatus($data)")
-	if(data?.flag) {
-		sendEvent(name: "DeviceWatch-DeviceStatus", value: "online", displayed: false, isStateChange: true)
-		state?.healthInRepair = false
-	} else {
-		state.healthInRepair = true
-		sendEvent(name: "DeviceWatch-DeviceStatus", value: "offline", displayed: false, isStateChange: true)
-		runIn(7, repairHealthStatus, [data: [flag: true]])
+	if(state?.hcRepairEnabled != false) {
+		if(data?.flag) {
+			sendEvent(name: "DeviceWatch-DeviceStatus", value: "online", displayed: false, isStateChange: true)
+			state?.healthInRepair = false
+		} else {
+			state.healthInRepair = true
+			sendEvent(name: "DeviceWatch-DeviceStatus", value: "offline", displayed: false, isStateChange: true)
+			runIn(7, repairHealthStatus, [data: [flag: true]])
+		}
 	}
 }
 
@@ -307,6 +315,7 @@ void processEvent() {
 		initialize()
 		state.swVersion = devVer()
 		state?.shownChgLog = false
+		state.androidDisclaimerShown = false
 	}
 	def eventData = state?.eventData
 	//LogAction("processEvent Parsing data ${eventData}", "trace")
@@ -316,6 +325,7 @@ void processEvent() {
 		LogAction("------------START OF API RESULTS DATA------------", "warn")
 		if(eventData) {
 			state.isBeta = eventData?.isBeta == true ? true : false
+			state.hcRepairEnabled = eventData?.hcRepairEnabled == true ? true : false
 			state.useMilitaryTime = eventData?.mt ? true : false
 			state.showLogNamePrefix = eventData?.logPrefix == true ? true : false
 			state.enRemDiagLogging = eventData?.enRemDiagLogging == true ? true : false
@@ -364,6 +374,7 @@ void processEvent() {
 
 def getStateSize()	{ return state?.toString().length() }
 def getStateSizePerc()	{ return (int) ((stateSize/100000)*100).toDouble().round(0) } //
+def getDevTypeId() { return device?.getTypeId() }
 
 def getDataByName(String name) {
 	state[name] ?: device.getDataValue(name)
@@ -1084,33 +1095,9 @@ def getCssData() {
 	return cssData
 }
 
-def getChartJsData() {
-	def chartJsData = null
-	//def htmlInfo = state?.htmlInfo
-	def htmlInfo
-	state.chartJsData = null
-	if(htmlInfo?.chartJsUrl && htmlInfo?.chartJsVer) {
-		if(state?.chartJsData) {
-			if (state?.chartJsVer?.toInteger() == htmlInfo?.chartJsVer?.toInteger()) {
-				//LogAction("getChartJsData: Chart Javascript Data is Current | Loading Data from State...")
-				chartJsData = state?.chartJsData
-			} else if (state?.chartJsVer?.toInteger() < htmlInfo?.chartJsVer?.toInteger()) {
-				//LogAction("getChartJsData: Chart Javascript Data is Outdated | Loading Data from Source...")
-				chartJsData = getFileBase64(htmlInfo.chartJsUrl, "text", "css")
-				state.chartJsData = chartJsData
-				state?.chartJsVer = htmlInfo?.chartJsVer
-			}
-		} else {
-			//LogAction("getChartJsData: Chart Javascript Data is Missing | Loading Data from Source...")
-			chartJsData = getFileBase64(htmlInfo.chartJsUrl, "text", "css")
-			state?.chartJsData = chartJsData
-			state?.chartJsVer = htmlInfo?.chartJsVer
-		}
-	} else {
-		//LogAction("getChartJsData: No Stored Chart Javascript Data Found for Device... Loading for Static URL...")
-		chartJsData = getFileBase64(chartJsUrl(), "text", "javascript")
-	}
-	return chartJsData
+def getChartJsData(b64=true) {
+	//LogAction("getChartJsData: No Stored Chart Javascript Data Found for Device... Loading for Static URL...")
+	return b64 ? getFileBase64(chartJsUrl(), "text", "javascript") : chartJsUrl()
 }
 
 def cssUrl() { return "https://raw.githubusercontent.com/tonesto7/nest-manager/master/Documents/css/ST-HTML.min.css" }
@@ -1142,9 +1129,9 @@ def gitBranch()		{ return state?.isBeta ? "beta" : "master" }
 def gitPath()		{ return "${gitRepo()}/${gitBranch()}"}
 def devVerInfo()	{ return getWebData([uri: "https://raw.githubusercontent.com/${gitPath()}/Data/changelog_weath.txt", contentType: "text/plain; charset=UTF-8"], "changelog") }
 
-def getWeatherIcon() {
+def getWeatherIcon(b64=true) {
 	try {
-		return getFileBase64(state?.curWeather?.current_observation?.icon_url, "image", "gif")
+		return b64 ? getFileBase64(state?.curWeather?.current_observation?.icon_url, "image", "gif") : state?.curWeather?.current_observation?.icon_url
 	}
 	catch (ex) {
 		log.error "getWeatherIcon Exception:", ex
@@ -1158,11 +1145,11 @@ def getWeatCondFromUrl(url) {
 	return splList?.last()
 }
 
-def getWeatherImg(cond) {
+def getWeatherImg(cond, b64=true) {
 	try {
 		def newCond = getWeatCondFromUrl(cond)
 		def url = "https://raw.githubusercontent.com/tonesto7/nest-manager/master/Images/Weather/icons/black/${getWeatCondFromUrl(cond) ?: "unknown"}.svg"
-		return getFileBase64(url, "image", "svg+xml")
+		return b64 ? getFileBase64(url, "image", "svg+xml") : url
 	}
 	catch (ex) {
 		log.error "getWeatherImg Exception:", ex
@@ -1170,9 +1157,9 @@ def getWeatherImg(cond) {
 	}
 }
 
-def getFavIcon() {
+def getFavIcon(b64=true) {
 	try {
-		return getFileBase64("https://cdn.rawgit.com/tonesto7/nest-manager/master/Images/App/weather_icon.ico", "image", "ico")
+		return b64 ? getFileBase64("https://cdn.rawgit.com/tonesto7/nest-manager/master/Images/App/weather_icon.ico", "image", "ico") : "https://cdn.rawgit.com/tonesto7/nest-manager/master/Images/App/weather_icon.ico"
 	}
 	catch (ex) {
 		log.error "getFavIcon Exception:", ex
@@ -1571,10 +1558,10 @@ def getWeatherAlertHtml() {
 	return wAlertHtml
 }
 
-def forecastDay(day) {
+def forecastDay(day, b64=true) {
 	if(!state?.curForecast) { return }
 	def dayName = "<b>${state.curForecast.forecast.txt_forecast.forecastday[day].title} </b><br>"
-	def foreImgB64 = getWeatherImg(state.curForecast.forecast.txt_forecast.forecastday[day].icon_url)
+	def foreImgB64 = getWeatherImg(state.curForecast.forecast.txt_forecast.forecastday[day].icon_url, b64)
 	def forecastImageLink = """<a class=\"${day}-modal\"><img src="${foreImgB64}" style="width:64px;height:64px;"></a><br>"""
 	def forecastTxt = ""
 
@@ -1589,6 +1576,13 @@ def forecastDay(day) {
 	def modalClose = "' }); }); </script>"
 
 	return dayName + forecastImageLink + modalHead + modalTitle + forecastImage + forecastTxt + modalClose
+}
+
+def androidDisclaimerMsg() {
+	if(state?.mobileClientType == "android" && !state?.androidDisclaimerShown) {
+		state.androidDisclaimerShown = true
+		return """<div class="androidAlertBanner">FYI... The Android Client has a bug with reloading the HTML a second time.\nIt will only load once!\nYou will be required to completely close the client and reload to view the content again!!!</div>"""
+	} else { return "" }
 }
 
 def getChgLogHtml() {
@@ -1610,6 +1604,8 @@ def getChgLogHtml() {
 	}
 	return chgStr
 }
+
+def hasHtml() { return true }
 
 def getWeatherHTML() {
 	try {
@@ -1663,11 +1659,12 @@ def getWeatherHTML() {
 				</head>
 				<body>
 					${getChgLogHtml()}
+					${androidDisclaimerMsg()}
 					${devBrdCastHtml}
 					${clientBl}
 					${updateAvail}
 					${getWeatherAlertHtml()}
-					<div class="container">
+					<div class="container" style="max-width: 100%; overflow: hidden;">
 						<h4>Current Weather Conditions</h4>
 						<h1 class="bottomBorder"> ${state?.curWeather?.current_observation?.display_location?.full} </h1>
 						<div class="row">
@@ -1710,15 +1707,16 @@ def getWeatherHTML() {
 
 						<div class="row topBorder">
 							<div class="centerText offset-by-three six columns">
-								<b>Station Id: ${state?.curWeather?.current_observation?.station_id}</b>
-								<b>${state?.curWeather?.current_observation?.observation_time}</b>
+								<b class="wStation">Station Id: ${state?.curWeather?.current_observation?.station_id}</b>
+								<b class="wStation">${state?.curWeather?.current_observation?.observation_time}</b>
 							</div>
 						</div>
 					</div>
 					<script>
 						function reloadWeatherPage() {
-							var url = "https://" + window.location.host + "/api/devices/${device?.getId()}/getWeatherHTML"
-							window.location = url;
+							// var url = "https://" + window.location.host + "/api/devices/${device?.getId()}/getWeatherHTML"
+							// window.location = url;
+							window.location.reload();
 						}
 					</script>
 					<div class="pageFooterBtn">
@@ -1739,7 +1737,81 @@ def getWeatherHTML() {
 	}
 }
 
-def historyGraphHtml() {
+def getDeviceTile(devNum="") {
+	try {
+		if(!state?.curWeather || !state?.curForecast) {
+			return hideWeatherHtml()
+		}
+		def updateAvail = !state.updateAvailable ? "" : """<div class="greenAlertBanner">Device Update Available!</div>"""
+		def clientBl = state?.clientBl ? """<div class="brightRedAlertBanner">Your Manager client has been blacklisted!\nPlease contact the Nest Manager developer to get the issue resolved!!!</div>""" : ""
+		//def obsrvTime = "Last Updated:\n${convertRfc822toDt(state?.curWeather?.current_observation?.observation_time_rfc822)}"
+		def obsrvTime = "Last Updated:\n${state?.curWeather?.current_observation?.observation_time_rfc822}"
+
+		def mainHtml = """
+			${clientBl}
+			${updateAvail}
+			${getWeatherAlertHtml()}
+			<div class="device">
+				<div class="container">
+					<h4>Current Weather Conditions</h4>
+					<h1 class="bottomBorder"> ${state?.curWeather?.current_observation?.display_location?.full} </h1>
+					<div class="row">
+						<div class="six columns">
+							<b>Feels Like:</b> ${getFeelslike()} <br>
+							<b>Precip %: </b> ${device.currentState("percentPrecip")?.value}% <br>
+							<b>Precip: </b> ${getPrecip()} <br>
+							<b>Humidity:</b> ${state?.curWeather?.current_observation?.relative_humidity}<br>
+							<b>Dew Point: </b>${getDewpoint()}<br>
+							<b>Pressure: </b> ${getPressure()} <br>
+							<b>UV Index: </b>${state.curWeather?.current_observation?.UV}<br>
+							<b>Visibility:</b> ${getVisibility()} <br>
+							<b>Lux:</b> ${getLux()}<br>
+							<b>Sunrise:</b> ${state?.localSunrise} <br> <b>Sunset: </b> ${state?.localSunset} <br>
+							<b>Wind:</b> ${state?.windStr} <br>
+						</div>
+						<div class="six columns">
+							<img class="offset-by-two eight columns" src="${getWeatherImg(state?.curWeather?.current_observation?.icon_url)}"> <br>
+							<h2>${getTemp()}</h2>
+							<h1 class ="offset-by-two topBorder">${state.curWeatherCond}</h1>
+						</div>
+					</div>
+					<div class="row topBorder">
+						<div class="centerText four columns">${forecastDay(0)}</div>
+						<div class="centerText four columns">${forecastDay(1)}</div>
+						<div class="centerText four columns">${forecastDay(2)}</div>
+					</div>
+					<div class="row">
+						<div class="centerText four columns">${forecastDay(3)}</div>
+						<div class="centerText four columns">${forecastDay(4)}</div>
+						<div class="centerText four columns">${forecastDay(5)}</div>
+					</div>
+					<div class="row">
+						<div class="centerText offset-by-two four columns">${forecastDay(6)}</div>
+						<div class="centerText four columns">${forecastDay(7)}</div>
+					</div>
+					<p style="font-size: 12px; font-weight: normal; text-align: center;">Tap Icon to View Forecast</p>
+
+					${historyGraphHtml()}
+
+					<div class="row topBorder">
+						<div class="centerText offset-by-three six columns">
+							<b class="wStation">Station Id: ${state?.curWeather?.current_observation?.station_id}</b><br/>
+							<b class="wStation">${state?.curWeather?.current_observation?.observation_time}</b>
+						</div>
+					</div>
+				</div>
+			</div>
+
+		"""
+		render contentType: "text/html", data: mainHtml, status: 200
+	}
+	catch (ex) {
+		log.error "getDeviceTile Exception:", ex
+		exceptionDataHandler(ex.message, "getDeviceTile")
+	}
+}
+
+def historyGraphHtml(devNum="") {
 	def html = ""
 	if(state?.showGraphs) {
 		if (state?.temperatureTable?.size() > 0 && state?.dewpointTable?.size() > 0) {
@@ -1758,8 +1830,8 @@ def historyGraphHtml() {
 			html = """
 			  <script type="text/javascript">
 				google.charts.load('current', {packages: ['corechart']});
-				google.charts.setOnLoadCallback(drawGraph);
-				function drawGraph() {
+				google.charts.setOnLoadCallback(drawWeatherGraph);
+				function drawWeatherGraph() {
 					var data = new google.visualization.DataTable();
 					data.addColumn('timeofday', 'time');
 					data.addColumn('number', 'Temp (Yesterday)');
@@ -1829,7 +1901,7 @@ def historyGraphHtml() {
 							width: '100%'
 						}
 					};
-					var chart = new google.visualization.AreaChart(document.getElementById('chart_div'));
+					var chart = new google.visualization.AreaChart(document.getElementById('chart_div${devNum}'));
 					chart.draw(data, options);
 				}
 			</script>

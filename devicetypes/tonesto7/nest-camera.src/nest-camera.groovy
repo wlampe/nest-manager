@@ -13,7 +13,7 @@ import groovy.time.TimeCategory
 
 preferences { }
 
-def devVer() { return "5.1.4" }
+def devVer() { return "5.3.0" }
 
 metadata {
 	definition (name: "${textDevName()}", author: "Anthony S.", namespace: "tonesto7") {
@@ -45,6 +45,7 @@ metadata {
 		attribute "isStreaming", "string"
 		attribute "audioInputEnabled", "string"
 		attribute "videoHistoryEnabled", "string"
+		attribute "motionPerson", "string"
 		attribute "minVideoHistoryHours", "string"
 		attribute "maxVideoHistoryHours", "string"
 		attribute "publicShareEnabled", "string"
@@ -120,19 +121,22 @@ metadata {
 		standardTile("test", "device.testBtn", width:2, height:2, decoration: "flat") {
 			state "default", label: 'Test', action:"testBtn"
 		}
+		valueTile("remind", "device.blah", inactiveLabel: false, width: 6, height: 2, decoration: "flat", wordWrap: true) {
+			state("default", label: 'Reminder:\nHTML Content is Available in SmartApp')
+		}
 		main "isStreamingStatus"
-		//details(["devCamHtml", "isStreaming", "take", "refresh", "motion", "cameraDetails", "sound"])
-		details(["videoPlayer", "isStreaming", "take", "refresh", "devCamHtml", "cameraDetails", "motion", "sound" ])
+		details(["videoPlayer", "isStreaming", "take", "refresh", "devCamHtml", "cameraDetails", "motion", "sound", "remind" ])
+
 	}
 	preferences {
-		input "enableEvtSnapShot", "bool", title: "Take Snapshot on Motion Events", description: "", defaultValue: true, displayDuringSetup: false
+		input "enableEvtSnapShot", "bool", title: "Take Snapshot on Motion Events?", description: "", defaultValue: true, displayDuringSetup: false
+		input "motionOnPersonOnly", "bool", title: "Only Trigger Motion Events When Person is Detected?", description: "", defaultValue: false, displayDuringSetup: false
 	}
 }
 
 mappings {
 	path("/getInHomeURL") {action: [GET: "getInHomeURL"]}
 	path("/getOutHomeURL") {action: [GET: "getOutHomeURL"]}
-
 	path("/getCamHtml") {action: [GET: "getCamHtml"]}
 }
 
@@ -212,13 +216,15 @@ def keepAwakeEvent() {
 
 void repairHealthStatus(data) {
 	Logger("repairHealthStatus($data)")
-	if(data?.flag) {
-		sendEvent(name: "DeviceWatch-DeviceStatus", value: "online", displayed: false, isStateChange: true)
-		state?.healthInRepair = false
-	} else {
-		state.healthInRepair = true
-		sendEvent(name: "DeviceWatch-DeviceStatus", value: "offline", displayed: false, isStateChange: true)
-		runIn(7, repairHealthStatus, [data: [flag: true]])
+	if(state?.hcRepairEnabled != false) {
+		if(data?.flag) {
+			sendEvent(name: "DeviceWatch-DeviceStatus", value: "online", displayed: false, isStateChange: true)
+			state?.healthInRepair = false
+		} else {
+			state.healthInRepair = true
+			sendEvent(name: "DeviceWatch-DeviceStatus", value: "offline", displayed: false, isStateChange: true)
+			runIn(7, repairHealthStatus, [data: [flag: true]])
+		}
 	}
 }
 
@@ -259,6 +265,7 @@ def processEvent() {
 		initialize()
 		state.swVersion = devVer()
 		state?.shownChgLog = false
+		state.androidDisclaimerShown = false
 	}
 	def eventData = state?.eventData
 	state.eventData = null
@@ -270,6 +277,7 @@ def processEvent() {
 			def results = eventData?.data
 			//log.debug "results: $results"
 			state.isBeta = eventData?.isBeta == true ? true : false
+			state.hcRepairEnabled = eventData?.hcRepairEnabled == true ? true : false
 			state.takeSnapOnEvt = eventData?.camTakeSnapOnEvt == true ? true : false
 			state.restStreaming = eventData?.restStreaming == true ? true : false
 			state.showLogNamePrefix = eventData?.logPrefix == true ? true : false
@@ -330,6 +338,7 @@ def processEvent() {
 
 def getStateSize()      { return state?.toString().length() }
 def getStateSizePerc()  { return (int) ((stateSize/100000)*100).toDouble().round(0) } //
+def getDevTypeId() { return device?.getTypeId() }
 
 def getDataByName(String name) {
 	state[name] ?: device.getDataValue(name)
@@ -515,6 +524,7 @@ def lastEventDataEvent(data) {
 	def newEndDt = data?.end_time ? tf.format(Date.parse("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", data?.end_time.toString())) : "Not Available"
 
 	def hasPerson = data?.has_person ? data?.has_person?.toBoolean() : false
+	state?.motionPerson = hasPerson
 	def hasMotion = data?.has_motion ? data?.has_motion?.toBoolean() : false
 	def hasSound = data?.has_sound ? data?.has_sound?.toBoolean() : false
 	def actZones = state?.activityZones
@@ -541,16 +551,17 @@ def lastEventDataEvent(data) {
 	if(state?.lastEventData) { state.lastEventData == null }
 
 	def tryPic = false
-	if(!state?.lastCamEvtData || (curStartDt != newStartDt || curEndDt != newEndDt) && (hasPerson || hasMotion || hasSound) || isStateChange(device, "lastEventType", evtType.toString())  || isStateChange(device, "lastEventZones", evtZoneNames.toString())) {
+
+	if(!state?.lastCamEvtData || (curStartDt != newStartDt || curEndDt != newEndDt) && (hasPerson || hasMotion || hasSound) || isStateChange(device, "lastEventType", evtType.toString()) || isStateChange(device, "lastEventZones", evtZoneNames.toString())) {
 		sendEvent(name: 'lastEventStart', value: newStartDt, descriptionText: "Last Event Start is ${newStartDt}", displayed: false)
 		sendEvent(name: 'lastEventEnd', value: newEndDt, descriptionText: "Last Event End is ${newEndDt}", displayed: false)
 		sendEvent(name: 'lastEventType', value: evtType, descriptionText: "Last Event Type was ${evtType}", displayed: false)
 		sendEvent(name: 'lastEventZones', value: evtZoneNames.toString(), descriptionText: "Last Event Zones: ${evtZoneNames}", displayed: false)
-		state.lastCamEvtData = ["startDt":newStartDt, "endDt":newEndDt, "hasMotion":hasMotion, "hasSound":hasSound, "hasPerson":hasPerson, "actZones":(data?.activity_zone_ids ?: null)]
+		state.lastCamEvtData = ["startDt":newStartDt, "endDt":newEndDt, "hasMotion":hasMotion, "hasSound":hasSound, "hasPerson":hasPerson, "motionOnPersonOnly":(settings?.motionOnPersonOnly == true), "actZones":(data?.activity_zone_ids ?: null)]
 		tryPic = evtSnapShotOk()
 		Logger(state?.enRemDiagLogging ? "└──────────────" : "└────────────────────────────")
 		//Logger("│	URL: ${state?.animation_url ?: "None"}")
-		Logger("│	Took Snapshot: ${tryPic}")
+		Logger("│	Took Snapshot: (${tryPic})")
 		Logger("│	Zones: ${evtZoneNames ?: "None"}")
 		Logger("│	End Time: (${newEndDt})")
 		Logger("│	Start Time: (${newStartDt})")
@@ -580,12 +591,13 @@ def motionSoundEvtHandler() {
 	}
 }
 
-def motionEvtHandler(data) {
+void motionEvtHandler(data) {
 	def tf = new SimpleDateFormat("E MMM dd HH:mm:ss z yyyy")
 	tf.setTimeZone(getTimeZone())
 	def dtNow = new Date()
 	def curMotion = device.currentState("motion")?.stringValue
 	def motionStat = "inactive"
+	def motionPerStat = "inactive"
 	if(state?.restStreaming == true && data) {
 		if(data?.endDt && data?.hasMotion) {
 			def newEndDt = null
@@ -593,23 +605,24 @@ def motionEvtHandler(data) {
 				newEndDt = Date.parse("E MMM dd HH:mm:ss z yyyy", data?.endDt.toString())+1.minutes
 			}
 			if(newEndDt) {
-				//log.debug "motionEvt now: ${tf.format(dtNow)} | end: ${tf.format(newEndDt)}"
-				//log.debug "motionEvt newEndDt > dtNow: (${newEndDt > dtNow})"
-				if(newEndDt > dtNow) {
+				def motGo = (data?.motionOnPersonOnly == true && data?.hasPerson != true) ? false : true
+				if(newEndDt > dtNow && motGo) {
 					motionStat = "active"
+					if(data?.hasPerson) { motionPerStat = "active" }
 					runIn(state?.motionSndChgWaitVal.toInteger()+6, "motionSoundEvtHandler", [overwrite: true])
 				}
 			}
 		}
 	}
-	if(isStateChange(device, "motion", motionStat.toString())) {
-		Logger("UPDATED | Motion Sensor is: (${motionStat}) | Original State: (${curMotion})")
+	if(isStateChange(device, "motion", motionStat.toString()) || isStateChange(device, "motionPerson", motionPerStat?.toString())) {
+		Logger("UPDATED | Motion Sensor is: (${motionStat}) | Person: (${motionPerStat}) | Original State: (${curMotion})")
 		sendEvent(name: "motion", value: motionStat, descriptionText: "Motion Sensor is: ${motionStat}", displayed: true, isStateChange: true, state: motionStat)
+		sendEvent(name: "motionPerson", value: motionPerStat, descriptionText: "Motion Person is: ${motionPerStat}", displayed: true, isStateChange: true, state: motionPerStat)
 		addCheckinReason("motion")
 	} else { LogAction("Motion Sensor is: (${motionStat}) | Original State: (${curMotion})") }
 }
 
-def soundEvtHandler(data) {
+void soundEvtHandler(data) {
 	def tf = new SimpleDateFormat("E MMM dd HH:mm:ss z yyyy")
 		tf.setTimeZone(getTimeZone())
 	def dtNow = new Date()
@@ -622,8 +635,6 @@ def soundEvtHandler(data) {
 				newEndDt = Date.parse("E MMM dd HH:mm:ss z yyyy", data?.endDt.toString())+1.minutes
 			}
 			if(newEndDt) {
-				// log.debug "soundEvt now: ${tf.format(dtNow)} | end: ${tf.format(newEndDt)}"
-				// log.debug "soundEvt newEndDt > dtNow: (${newEndDt > dtNow})"
 				if(newEndDt > dtNow) {
 					sndStat = "detected"
 					runIn(state?.motionSndChgWaitVal.toInteger()+6, "motionSoundEvtHandler", [overwrite: true])
@@ -779,7 +790,7 @@ def healthNotifyOk() {
 
 def checkHealth() {
 	def isOnline = (getHealthStatus() == "ONLINE") ? true : false
-	if(isOnline || state?.healthMsg != true || state?.healthInRepair == true) { return }
+	if(state?.healthMsg != true || state?.healthInRepair == true || isOnline) { return }
 	if(healthNotifyOk()) {
 		def now = new Date()
 		parent?.deviceHealthNotify(this, isOnline)
@@ -1174,6 +1185,13 @@ def getCamApiServer() {
 	return data ?: null
 }
 
+def androidDisclaimerMsg() {
+	if(state?.mobileClientType == "android" && !state?.androidDisclaimerShown) {
+		state.androidDisclaimerShown = true
+		return """<div class="androidAlertBanner">FYI... The Android Client has a bug with reloading the HTML a second time.\nIt will only load once!\nYou will be required to completely close the client and reload to view the content again!!!</div>"""
+	} else { return "" }
+}
+
 def getChgLogHtml() {
 	def chgStr = ""
 	//log.debug "shownChgLog: ${state?.shownChgLog}"
@@ -1197,13 +1215,25 @@ def getChgLogHtml() {
 	return chgStr
 }
 
+def hasHtml() { return true }
+
+def getCamIframHtml() {
+	def id = getPublicVidID() ? getPublicVidID() : null
+	return id ? """
+		<div class="embed-responsive embed-responsive-16by9">
+			<iframe type="text/html" frameborder="0" width="480" height="394" src="//video.nest.com/embedded/live/${id}?autoplay=0" allowfullscreen></iframe>
+		</div>
+	""" : ""
+}
+
 def getCamHtml() {
 	try {
 		// These are used to determine the URL for the nest cam stream
+		//def refreshUrl = "https://api.smartthings.com/elder/${location?.id}/api/devices/${device?.getId()}/getCamHtml"
 		def updateAvail = !state.updateAvailable ? "" : """<div class="greenAlertBanner">Device Update Available!</div>"""
 		def clientBl = state?.clientBl ? """<div class="brightRedAlertBanner">Your Manager client has been blacklisted!\nPlease contact the Nest Manager developer to get the issue resolved!!!</div>""" : ""
 		def pubVidUrl = state?.public_share_url
-		def camHtml = (pubVidUrl && state?.camUUID && state?.isStreaming && state?.isOnline) ? showCamHtml() : hideCamHtml()
+		def camHtml = (pubVidUrl && state?.camUUID && state?.isStreaming && state?.isOnline) ? showCamHtml(false) : hideCamHtml()
 		def devBrdCastData = state?.devBannerData ?: null
 		def devBrdCastHtml = ""
 		if(devBrdCastData) {
@@ -1233,17 +1263,17 @@ def getCamHtml() {
 				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.1/css/swiper.min.css", "text", "css")}" />
 				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex.min.css", "text", "css")}" />
 				<link rel="stylesheet" href="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex-theme-top.min.css", "text", "css")}" />
-
 				<script src="${getFileBase64("https://cdnjs.cloudflare.com/ajax/libs/Swiper/3.4.1/js/swiper.min.js", "text", "javascript")}"></script>
 				<style>
 				</style>
 			</head>
 			<body>
 				${getChgLogHtml()}
+				${androidDisclaimerMsg()}
 				${devBrdCastHtml}
 				${clientBl}
 				${updateAvail}
-				<div class="swiper-container">
+				<div class="swiper-container" style="max-width: 100%; overflow: hidden;">
 					<div class="swiper-wrapper">
 						${camHtml}
 						<div class="swiper-slide">
@@ -1347,7 +1377,6 @@ def getCamHtml() {
 						iOSEdgeSwipeDetection: true,
 						parallax: true,
 						slideToClickedSlide: true,
-
 						effect: 'coverflow',
 						coverflow: {
 						  rotate: 50,
@@ -1365,8 +1394,7 @@ def getCamHtml() {
 						paginationClickable: true
 					})
 					function reloadCamPage() {
-					    var url = "https://" + window.location.host + "/api/devices/${device?.getId()}/getCamHtml"
-					    window.location = url;
+					    window.location.reload();
 					}
 				</script>
 				<div class="pageFooterBtn">
@@ -1387,7 +1415,150 @@ def getCamHtml() {
 	}
 }
 
-def showCamHtml() {
+def getDeviceTile(devNum) {
+	try {
+		def updateAvail = !state.updateAvailable ? "" : """<div class="greenAlertBanner">Device Update Available!</div>"""
+		def clientBl = state?.clientBl ? """<div class="brightRedAlertBanner">Your Manager client has been blacklisted!\nPlease contact the Nest Manager developer to get the issue resolved!!!</div>""" : ""
+		def pubVidUrl = state?.public_share_url
+		def camHtml = (pubVidUrl && state?.camUUID && state?.isStreaming && state?.isOnline) ? showCamHtml(true) : hideCamHtml()
+		def mainHtml = """
+			${clientBl}
+			${updateAvail}
+			${getCamIframHtml()}
+			<div class="device">
+				<div class="swiper-container-${devNum}" style="max-width: 100%; overflow: hidden;">
+					<div class="swiper-wrapper">
+						${camHtml}
+						<div class="swiper-slide">
+						  <section class="sectionBgTile">
+							<h3>Device Info</h3>
+							<table class="devInfoTile centerText">
+							  <col width="40%">
+							  <col width="40%">
+							  <thead>
+								<th>Network Status</th>
+								<th>API Status</th>
+							  </thead>
+							  <tbody>
+								<tr>
+								  <td${state?.onlineStatus != "Online" ? """ class="redText" """ : ""}>${state?.onlineStatus}</td>
+								  <td${state?.apiStatus != "Good" ? """ class="orangeText" """ : ""}>${state?.apiStatus}</td>
+								</tr>
+							  </tbody>
+							</table>
+						  </section>
+						  <section class="sectionBgTile">
+							<table class="devInfoTile centerText">
+							  <col width="50%">
+							  <col width="50%">
+								<thead>
+								  <th>Video History (Min.)</th>
+								  <th>Video History (Max.)</th>
+								</thead>
+								<tbody>
+								  <tr>
+									<td>${getRecTimeDesc(state?.minVideoHistoryHours) ?: "Not Available"}</td>
+									<td>${getRecTimeDesc(state?.maxVideoHistoryHours) ?: "Not Available"}</td>
+								  </tr>
+							  </tbody>
+							</table>
+						  </section>
+						  <section class="sectionBgTile">
+							<table class="devInfoTile centerText">
+							  <col width="33%">
+							  <col width="33%">
+							  <col width="33%">
+							  <thead>
+								<th>Public Video</th>
+								<th>Mic Status</th>
+							  </thead>
+							  <tbody>
+								<tr>
+								  <td>${state?.publicShareEnabled.toString()}</td>
+								  <td>${state?.audioInputEnabled.toString()}</td>
+								</tr>
+							  </tbody>
+							</table>
+						  </section>
+						  <section class="sectionBgTile">
+							<table class="devInfoTile centerText">
+							  <col width="40%">
+							  <col width="20%">
+							  <col width="40%">
+							  <thead>
+								<th>FW Version</th>
+								<th>Debug</th>
+								<th>Device Type</th>
+							  </thead>
+							  <tbody>
+								  <td>v${state?.softwareVer.toString()}</td>
+								  <td>${state?.debugStatus}</td>
+								  <td>${state?.devTypeVer.toString()}</td>
+							  </tbody>
+							</table>
+						  </section>
+						  <section class="sectionBgTile">
+							<table class="devInfoTile centerText">
+							   <thead>
+								 <th>Last Online Change</th>
+								 <th>Data Last Received</th>
+							   </thead>
+							   <tbody>
+								 <tr>
+								   <td class="dateTimeTextTile">${state?.lastConnection.toString()}</td>
+								   <td class="dateTimeTextTile">${state?.lastUpdatedDt.toString()}</td>
+								 </tr>
+							   </tbody>
+							 </table>
+						   </section>
+						</div>
+					</div>
+					<div class="swiper-pagination"></div>
+					<div style="text-align: center;">
+						<p class="slideFooterMsgTile">Swipe/Drag to Change Slide</p>
+					</div>
+				</div>
+			</div>
+			<script>
+				var mySwiper${devNum} = new Swiper ('.swiper-container-${devNum}', {
+					direction: 'horizontal',
+					lazyLoading: true,
+					loop: true,
+					slidesPerView: '1',
+					centeredSlides: true,
+					spaceBetween: 100,
+					autoHeight: true,
+					iOSEdgeSwipeDetection: true,
+					parallax: true,
+					slideToClickedSlide: true,
+					effect: 'coverflow',
+					// resistance: true,
+					coverflow: {
+					  rotate: 50,
+					  stretch: 0,
+					  depth: 100,
+					  modifier: 1,
+					  slideShadows : true
+					},
+					onTap: (swiper, event) => {
+						let element = event.target;
+						swiper.slideNext()
+					},
+					pagination: '.swiper-pagination',
+					paginationHide: false,
+					paginationClickable: true
+				})
+			</script>
+		"""
+		return mainHtml
+	}
+	catch (ex) {
+		log.error "getDeviceTile Exception:", ex
+		exceptionDataHandler(ex.message, "getDeviceTile")
+	}
+}
+
+def showCamHtml(tile=false) {
 	def pubVidUrl = state?.public_share_url
 	if(!state?.camUUID) { getCamUUID(getPublicVidID()) }
 	def camUUID = state?.camUUID
@@ -1400,7 +1571,7 @@ def showCamHtml() {
 	def camPlaylistUrl = "https://${liveStreamURL}/nexus_aac/${camUUID}/playlist.m3u8"
 
 	def animationUrl = state?.animation_url ? getFileBase64(state?.animation_url, 'image', 'gif') : null
-	def pubSnapUrl = state?.snapshot_url ? getFileBase64(state?.snapshot_url, 'image', 'jpeg') : null
+	def pubSnapUrl = state?.snapshot_url ? (!tile ? getFileBase64(state?.snapshot_url, 'image', 'jpeg') : state?.snapshot_url ) : null
 
 	def vidBtn = (!state?.isStreaming || !liveStreamURL) ? "" : """<a href="#" onclick="toggle_visibility('liveStream');" class="button yellow">Live Video</a>"""
 	def imgBtn = (!state?.isStreaming || !pubSnapUrl) ? "" : """<a href="#" onclick="toggle_visibility('still');" class="button blue">Still Image</a>"""
@@ -1408,10 +1579,11 @@ def showCamHtml() {
 
 	def data = """
 		<div class="swiper-slide">
-			<div style="padding: 5px;">
-				<section class="sectionBg">
+			${androidDisclaimerMsg()}
+			<div>
+				<section class="${tile ? "sectionBgTile" : "sectionBg"} centerText">
 					<h3>Last Camera Event</h3>
-					<table class="devInfo">
+					<table class="${tile ? "devInfoTile" : "devInfo"}">
 					  <col width="45%">
 					  <col width="55%">
 					  <tbody>
@@ -1423,8 +1595,8 @@ def showCamHtml() {
 					</table>
 				</section>
 				<img src="${animationUrl}" width="100%"/>
-				<section class="sectionBg">
-					<table class="devInfo">
+				<section class="${tile ? "sectionBgTile" : "sectionBg"} centerText">
+					<table class="${tile ? "devInfoTile" : "devInfo"}">
 					  <col width="45%">
 					  <col width="55%">
 					  <thead>
@@ -1442,9 +1614,9 @@ def showCamHtml() {
 			</div>
 		</div>
 		<div class="swiper-slide">
-			<section class="sectionBg">
+			<section class="${tile ? "sectionBgTile" : "sectionBg"}">
 				<h3>Still Image</h3>
-				<table class="devInfo">
+				<table class="${tile ? "devInfoTile" : "devInfo"} centerText">
 				  <tbody>
 					<tr>
 					  <td>
