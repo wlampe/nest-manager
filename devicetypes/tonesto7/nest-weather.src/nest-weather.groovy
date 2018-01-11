@@ -12,7 +12,7 @@ import java.text.SimpleDateFormat
 
 preferences {  }
 
-def devVer() { return "5.3.0" }
+def devVer() { return "5.3.1" }
 
 metadata {
 	definition (name: "${textDevName()}", namespace: "tonesto7", author: "Anthony S.") {
@@ -367,7 +367,7 @@ void processEvent() {
 		//return null
 	}
 	catch (ex) {
-		log.error "generateEvent Exception:", ex
+		log.error("generateEvent Exception:", ex)
 		exceptionDataHandler(ex.message, "generateEvent")
 	}
 }
@@ -667,8 +667,8 @@ def getWeatherConditions(Map weatData) {
 		}
 	}
 	catch (ex) {
-		log.error "getWeatherConditions Exception:", ex
-		exceptionDataHandler("${ex}", "getWeatherConditions")
+		log.error("getWeatherConditions Exception:", ex)
+		exceptionDataHandler(ex.message, "getWeatherConditions")
 	}
 }
 
@@ -693,8 +693,8 @@ def getWeatherForecast(Map weatData) {
 		}
 	}
 	catch (ex) {
-		log.error "getWeatherForecast Exception:", ex
-		exceptionDataHandler("${ex}", "getWeatherForecast")
+		log.error("getWeatherForecast Exception:", ex)
+		exceptionDataHandler(ex.message, "getWeatherForecast")
 	}
 }
 
@@ -715,8 +715,8 @@ def getWeatherAstronomy(weatData) {
 		}
 	}
 	catch (ex) {
-		log.error "getWeatherAstronomy Exception:", ex
-		exceptionDataHandler("${ex}", "getWeatherAstronomy")
+		log.error("getWeatherAstronomy Exception:", ex)
+		exceptionDataHandler(ex.message, "getWeatherAstronomy")
 	}
 }
 
@@ -841,8 +841,8 @@ def getWeatherAlerts(weatData) {
 		}
 	}
 	catch (ex) {
-		log.error "getWeatherAlerts Exception:", ex
-		exceptionDataHandler("${ex}", "getWeatherAlerts")
+		log.error("getWeatherAlerts Exception:", ex)
+		exceptionDataHandler(ex.message, "getWeatherAlerts")
 	}
 }
 
@@ -861,7 +861,7 @@ private pad(String s, size = 25) {
 		}
 	}
 	catch (ex) {
-		log.error "pad Exception:", ex
+		log.error("pad Exception:", ex)
 		exceptionDataHandler(ex.message, "pad")
 	}
 }
@@ -888,10 +888,10 @@ def luxUpdate() {
 private estimateLux(weatherIcon) {
 	//LogAction("estimateLux ( ${weatherIcon} )", "trace")
 	try {
-		if(!weatherIcon || !state?.sunriseDate || !state?.sunsetDate || !state?.sunriseDate?.time || !state?.sunsetDate?.time) {
+		if(!weatherIcon || !state?.sunriseDate || !state?.sunsetDate || ! (long) state?.sunriseDate?.time || ! (long) state?.sunsetDate?.time) {
 			Logger("estimateLux: Weather Data missing...", "warn")
-			Logger("state.sunriseDate: ${state?.sunriseDate} state.sunriseDate.time: ${state?.sunriseDate?.time}")
-			Logger("state.sunsetDate: ${state?.sunsetDate} state.sunsetDate.time: ${state?.sunsetDate?.time}")
+			Logger("state.sunriseDate: ${state?.sunriseDate} state.sunsetDate: ${state?.sunsetDate}")
+			Logger("state.sunriseDate.time: ${ (long) state?.sunriseDate?.time} state.sunsetDate.time: ${ (long) state?.sunsetDate?.time}")
 			return null
 		} else {
 			def lux = 0
@@ -963,8 +963,10 @@ private estimateLux(weatherIcon) {
 		}
 	}
 	catch (ex) {
-		log.error "estimateLux Exception:", ex
-		exceptionDataHandler("${ex}", "estimateLux")
+		log.warn "state.sunriseDate: ${state?.sunriseDate}"
+		log.warn "state.sunsetDate: ${state?.sunsetDate}"
+		exceptionDataHandler(ex.message, "estimateLux")
+		log.error("estimateLux Exception:", ex)
 	}
 	return null
 }
@@ -1004,28 +1006,29 @@ def convertRfc822toDt(dt) {
 *************************************************************************************************/
 void Logger(msg, logType = "debug") {
 	def smsg = state?.showLogNamePrefix ? "${device.displayName}: ${msg}" : "${msg}"
-	switch (logType) {
-		case "trace":
-			log.trace "${smsg}"
-			break
-		case "debug":
-			log.debug "${smsg}"
-			break
-		case "info":
-			log.info "${smsg}"
-			break
-		case "warn":
-			log.warn "${smsg}"
-			break
-		case "error":
-			log.error "${smsg}"
-			break
-		default:
-			log.debug "${smsg}"
-			break
-	}
 	if(state?.enRemDiagLogging) {
 		parent.saveLogtoRemDiagStore(smsg, logType, "Weather")
+	} else {
+		switch (logType) {
+			case "trace":
+				log.trace "${smsg}"
+				break
+			case "debug":
+				log.debug "${smsg}"
+				break
+			case "info":
+				log.info "${smsg}"
+				break
+			case "warn":
+				log.warn "${smsg}"
+				break
+			case "error":
+				log.error "${smsg}"
+				break
+			default:
+				log.debug "${smsg}"
+				break
+		}
 	}
 }
 
@@ -1220,12 +1223,12 @@ def getSunriseSunset() {
 	// Sunrise / sunset
 	try {
 		def a = state?.curAstronomy?.moon_phase
-		if(state.curWeather?.current_observation?.local_tz_offset == null || a == null) { Logger("observation issue") ; return }
-		def today = localDate("GMT${state.curWeather?.current_observation?.local_tz_offset}")
+		if(state?.curWeather?.current_observation?.local_tz_offset == null || a == null) { Logger("observation issue") ; return }
+		def today = localDate("GMT${state?.curWeather?.current_observation?.local_tz_offset}")
 
 		def ltf = new SimpleDateFormat("yyyy-MM-dd HH:mm")
 
-		ltf.setTimeZone(TimeZone.getTimeZone("GMT${state.curWeather?.current_observation?.local_tz_offset}"))
+		ltf.setTimeZone(TimeZone.getTimeZone("GMT${state?.curWeather?.current_observation?.local_tz_offset}"))
 
 		def utf = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
 		utf.setTimeZone(TimeZone.getTimeZone("GMT"))
@@ -1236,7 +1239,7 @@ def getSunriseSunset() {
 		state.sunsetDate = sunsetDate
 
 		def tf = new java.text.SimpleDateFormat("h:mm a")
-		tf.setTimeZone(TimeZone.getTimeZone("GMT${state.curWeather?.current_observation?.local_tz_offset}"))
+		tf.setTimeZone(TimeZone.getTimeZone("GMT${state?.curWeather?.current_observation?.local_tz_offset}"))
 		def localSunrise = "${tf.format(sunriseDate)}"
 		def localSunset = "${tf.format(sunsetDate)}"
 		state.localSunrise = localSunrise

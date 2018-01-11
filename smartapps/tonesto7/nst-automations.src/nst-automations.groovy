@@ -27,8 +27,8 @@ definition(
 	appSetting "devOpt"
 }
 
-def appVersion() { "5.3.0" }
-def appVerDate() { "11-27-2017" }
+def appVersion() { "5.3.1" }
+def appVerDate() { "01-11-2018" }
 
 preferences {
 	//startPage
@@ -511,13 +511,14 @@ def stateUpdate(key, value) {
 
 def initAutoApp() {
 	//log.debug "${app.label} initAutoApp..."			// Must be log.debug
-	def restoreId = settings["restoreId"]
-	def restoreComplete = settings["restoreCompleted"] == true ? true : false
+	//def restoreId = settings["restoreId"]
+	//def restoreComplete = settings["restoreCompleted"] == true ? true : false
 	if(settings["watchDogFlag"]) {
 		atomicState?.automationType = "watchDog"
 	} else if(settings["remDiagFlag"]) {
 		atomicState?.automationType = "remDiag"
 	}
+/*
 	else if (restoreId != null && restoreComplete == false) {
 		LogAction("Restored AutomationType: (${settings?.automationTypeFlag})", "info", true)
 		if(parent?.callRestoreState(app, restoreId)) {
@@ -527,6 +528,7 @@ def initAutoApp() {
 			settingUpdate("restoreCompleted", true, "bool")
 		}
 	}
+*/
 
 	def autoType = getAutoType()
 	if(autoType == "nMode") {
@@ -536,7 +538,9 @@ def initAutoApp() {
 	unsubscribe()
 	def autoDisabled = getIsAutomationDisabled()
 
-	if(!autoDisabled && (restoreId && restoreComplete == false ? false : true)) {
+	//if(!autoDisabled && (restoreId && restoreComplete == false ? false : true)) {
+
+	if(!autoDisabled) {
 		automationsInst()
 
 		if(autoType == "schMot" && isSchMotConfigured()) {
@@ -1031,7 +1035,7 @@ def subscribeToEvents() {
 	}
 	//watchDog Subscriptions
 	if(autoType == "watchDog") {
-		// if(isWatchdogConfigured()) {
+		// if(isWatchdogConfigured())
 		def tstats = parent?.getTstats()
 		def foundTstats
 
@@ -1051,11 +1055,12 @@ def subscribeToEvents() {
 				return d1
 			}
 		}
-		//Alarm status monitoring
-		if(settings["${autoType}AlarmDevices"] && settings?."${pName}AllowAlarmNotif") {
-			if(settings["${autoType}_Alert_1_Use_Alarm"] || settings["${autoType}_Alert_2_Use_Alarm"]) {
-				subscribe(settings["${autoType}AlarmDevices"], "alarm", alarmAlertEvt)
-			}
+	}
+
+	//Alarm status monitoring if any automation has alarm notification enabled
+	if(settings["${autoType}AlarmDevices"] && settings?."${pName}AllowAlarmNotif") {
+		if(settings["${autoType}_Alert_1_Use_Alarm"] || settings["${autoType}_Alert_2_Use_Alarm"]) {
+			subscribe(settings["${autoType}AlarmDevices"], "alarm", alarmAlertEvt)
 		}
 	}
 
@@ -1570,7 +1575,7 @@ def remSendoSetCool(chgval, onTemp, offTemp) {
 	def remSenTstatMir = settings?.schMotTstatMir
 
 	try {
-		def hvacMode = remSenTstat ? remSenTstat?.currentThermostatMode.toString() : null
+		def hvacMode = remSenTstat ? remSenTstat?.currentThermostatMode?.toString() : null
 		def curCoolSetpoint = getTstatSetpoint(remSenTstat, "cool")
 		def curHeatSetpoint = getTstatSetpoint(remSenTstat, "heat")
 		def tempChangeVal = !remSenTstatTempChgVal ? 5.0 : Math.min(Math.max(remSenTstatTempChgVal.toDouble(), 2.0), 5.0)
@@ -1610,7 +1615,7 @@ def remSendoSetHeat(chgval, onTemp, offTemp) {
 	def remSenTstatMir = schMotTstatMir
 
 	try {
-		def hvacMode = remSenTstat ? remSenTstat?.currentThermostatMode.toString() : null
+		def hvacMode = remSenTstat ? remSenTstat?.currentThermostatMode?.toString() : null
 		def curCoolSetpoint = getTstatSetpoint(remSenTstat, "cool")
 		def curHeatSetpoint = getTstatSetpoint(remSenTstat, "heat")
 		def tempChangeVal = !remSenTstatTempChgVal ? 5.0 : Math.min(Math.max(remSenTstatTempChgVal.toDouble(), 2.0), 5.0)
@@ -1916,7 +1921,8 @@ def getRemSenTempsToList() {
 }
 
 def getDeviceTemp(dev) {
-	def temp = dev?.currentValue("temperature") ? dev?.currentValue("temperature").toString()?.replaceAll("\\[|\\]", "") : 0
+	def t0 = dev?.currentValue("temperature")
+	def temp = t0 ? t0?.toString()?.replaceAll("\\[|\\]", "") : 0
 	return temp && "$temp"?.isNumber() ? temp?.toDouble() : 0
 }
 
@@ -2417,7 +2423,8 @@ def doFanOperation(tempDiff, curTstatTemp, curHeatSetpoint, curCoolSetpoint) {
 					}
 				}
 				if(swOn && atomicState?.haveRunFan && checkFanSpeedSupport(sw)) {
-					def speed = sw?.currentValue("currentState") ?: null
+					def t0 = sw?.currentValue("currentState")
+					def speed = t0 ?: null
 					if(settings?."${pName}FanSwitchSpeedCtrl" && settings?."${pName}FanSwitchHighSpeed" && settings?."${pName}FanSwitchMedSpeed" && settings?."${pName}FanSwitchLowSpeed") {
 						if(tempDiff < settings?."${pName}FanSwitchMedSpeed".toDouble()) {
 							if(speed != "LOW") {
@@ -2693,7 +2700,8 @@ def humCtrlHumidityDesc() {
 		str += "Sensor Humidity (average): (${getDeviceVarAvg(settings.humCtrlHumidity, "currentHumidity")}%)"
 		settings?.humCtrlHumidity?.sort { it?.displayName }?.each { dev ->
 			cnt = cnt+1
-			def val = strCapitalize(dev?.currentHumidity) ?: "Not Set"
+			def t0 = strCapitalize(dev?.currentHumidity)
+			def val = t0 ?: "Not Set"
 			str += "${(cnt >= 1) ? "${(cnt == cCnt) ? "\n└" : "\n├"}" : "\n└"} ${dev?.label}: ${(dev?.label?.toString()?.length() > 10) ? "\n${(cCnt == 1 || cnt == cCnt) ? "    " : "│"}└ " : ""}(${val}%)"
 		}
 		return str
@@ -2877,7 +2885,8 @@ def getExtConditions( doEvent = false ) {
 
 				def dp = 0.0
 				if(weather) {  // Dewpoint is calculated in dth
-					dp = weather?.currentValue("dewpoint") ? weather?.currentValue("dewpoint")?.toString()?.replaceAll("\\[|\\]", "")?.toDouble() : 0.0
+					def t0 = weather?.currentValue("dewpoint")
+					dp = t0 ? t0?.toString()?.replaceAll("\\[|\\]", "")?.toDouble() : 0.0
 				}
 				def c_temp = 0.0
 				def f_temp = 0 as Integer
@@ -2925,7 +2934,7 @@ def getExtTmpDewPoint() {
 
 def getDesiredTemp() {
 	def extTmpTstat = settings?.schMotTstat
-	def curMode = extTmpTstat.currentnestThermostatMode.toString()
+	def curMode = extTmpTstat ? extTmpTstat?.currentnestThermostatMode?.toString() : null
 	def modeOff = (curMode in ["off"]) ? true : false
 	def modeEco = (curMode in ["eco"]) ? true : false
 	def modeCool = (curMode == "cool") ? true : false
@@ -2983,7 +2992,7 @@ def extTmpTempOk(disp=false, last=false) {
 		def curDp = getExtTmpDewPoint()
 		def diffThresh = Math.abs(getExtTmpTempDiffVal())
 
-		def curMode = extTmpTstat.currentnestThermostatMode.toString()
+		def curMode = extTmpTstat ? extTmpTstat?.currentnestThermostatMode?.toString() : null
 		def modeOff = (curMode == "off") ? true : false
 		def modeCool = (curMode == "cool") ? true : false
 		def modeHeat = (curMode == "heat") ? true : false
@@ -3143,7 +3152,7 @@ def extTmpTempCheck(cTimeOut = false) {
 			if(cTimeOut) { atomicState."${pName}timeOutOn" = true }
 			def timeOut = atomicState."${pName}timeOutOn" ?: false
 
-			def curMode = extTmpTstat?.currentnestThermostatMode?.toString()
+			def curMode = extTmpTstat ? extTmpTstat?.currentnestThermostatMode?.toString() : null
 			def modeOff = (curMode in ["off", "eco"]) ? true : false
 			def modeEco = (curMode in ["eco"]) ? true : false
 			def allowNotif = settings?."${pName}NotificationsOn" ? true : false
@@ -3340,7 +3349,7 @@ def extTmpDpOrTempEvt(type) {
 		if(lastTempWithinThreshold == null || tempWithinThreshold != lastTempWithinThreshold) {
 
 			def extTmpTstat = settings?.schMotTstat
-			def curMode = extTmpTstat?.currentnestThermostatMode.toString()
+			def curMode = extTmpTstat ? extTmpTstat?.currentnestThermostatMode?.toString() : null
 			def modeOff = (curMode in ["off", "eco"]) ? true : false
 			def offVal = getExtTmpOffDelayVal()
 			def onVal = getExtTmpOnDelayVal()
@@ -3386,7 +3395,8 @@ def conWatContactDesc() {
 		str += "Contact Status:"
 		settings?.conWatContacts?.sort { it?.displayName }?.each { dev ->
 			cnt = cnt+1
-			def val = strCapitalize(dev?.currentContact) ?: "Not Set"
+			def t0 = strCapitalize(dev?.currentContact)
+			def val = t0 ?: "Not Set"
 			str += "${(cnt >= 1) ? "${(cnt == cCnt) ? "\n└" : "\n├"}" : "\n└"} ${dev?.label}: (${val})"
 		}
 		return str
@@ -3435,7 +3445,6 @@ def conWatCheck(cTimeOut = false) {
 			def modeEco = (curMode in ["eco"]) ? true : false
 			//def curNestPres = getTstatPresence(conWatTstat)
 			def modeOff = (curMode in ["off", "eco"]) ? true : false
-			def openCtDesc = getOpenContacts(conWatContacts) ? " '${getOpenContacts(conWatContacts)?.join(", ")}' " : " a selected contact "
 			def allowNotif = settings?."${pName}NotificationsOn" ? true : false
 			def allowSpeech = allowNotif && settings?."${pName}AllowSpeechNotif" ? true : false
 			def allowAlarm = allowNotif && settings?."${pName}AllowAlarmNotif" ? true : false
@@ -3556,8 +3565,10 @@ def conWatCheck(cTimeOut = false) {
 					if((getConWatOpenDtSec() >= (getConWatOffDelayVal() - 2)) && (getConWatRestoreDelayBetweenDtSec() >= (getConWatRestoreDelayBetweenVal() - 2))) {
 						atomicState."${pName}timeOutOn" = false
 						atomicState?.conWatRestoreMode = curMode
+						def t0 = getOpenContacts(conWatContacts)
+						def openCtDesc = t0 ? " '${t0?.join(", ")}' " : " a selected contact "
 						LogAction("conWatCheck: Saving ${conWatTstat?.label} mode (${strCapitalize(atomicState?.conWatRestoreMode)})", "info", true)
-						LogAction("conWatCheck: ${openCtDesc}${getOpenContacts(conWatContacts).size() > 1 ? "are" : "is"} still Open: Turning 'OFF' '${conWatTstat?.label}'", "debug", true)
+						LogAction("conWatCheck: ${openCtDesc}${t0?.size() > 1 ? "are" : "is"} still Open: Turning 'OFF' '${conWatTstat?.label}'", "debug", true)
 						scheduleAutomationEval(60)
 						if(setTstatMode(conWatTstat, "eco", pName)) {
 							storeLastAction("Set $conWatTstat to 'ECO'", getDtNow(), pName, conWatTstat)
@@ -3615,7 +3626,7 @@ def conWatContactEvt(evt) {
 	if(atomicState?.disableAutomation) { return }
 	else {
 		def conWatTstat = settings?.schMotTstat
-		def curMode = conWatTstat?.currentnestThermostatMode.toString()
+		def curMode = conWatTstat ? conWatTstat?.currentnestThermostatMode?.toString() : null
 		def isModeOff = (curMode in ["eco"]) ? true : false
 		def conOpen = (evt?.value == "open") ? true : false
 		def canSched = false
@@ -3656,7 +3667,8 @@ def leakWatSensorsDesc() {
 		str += "Leak Sensors:"
 		settings?.leakWatSensors?.sort { it?.displayName }?.each { dev ->
 			cnt = cnt+1
-			def val = strCapitalize(dev?.currentWater) ?: "Not Set"
+			def t0 = strCapitalize(dev?.currentWater)
+			def val = t0 ?: "Not Set"
 			str += "${(cnt >= 1) ? "${(cnt == cCnt) ? "\n└" : "\n├"}" : "\n└"} ${dev?.label}: (${val})"
 		}
 		return str
@@ -3669,7 +3681,7 @@ def isLeakWatConfigured() {
 }
 
 def getLeakWatSensorsOk() { return settings?.leakWatSensors?.currentState("water")?.value.contains("wet") ? false : true }
-def leakWatSensorsOk() { return (!settings?.leakWatSensors) ? false : true }
+//def leakWatSensorsOk() { return (!settings?.leakWatSensors) ? false : true }
 //def leakWatScheduleOk() { return autoScheduleOk(leakWatPrefix()) }
 
 // TODO allow override from schedule?
@@ -3695,7 +3707,6 @@ def leakWatCheck() {
 			def curMode = leakWatTstat?.currentThermostatMode.toString()
 			//def curNestPres = getTstatPresence(leakWatTstat)
 			def modeOff = (curMode == "off") ? true : false
-			def wetCtDesc = getWetWaterSensors(leakWatSensors) ? " '${getWetWaterSensors(leakWatSensors)?.join(", ")}' " : " a selected leak sensor "
 			def allowNotif = settings?."${pName}NotificationsOn" ? true : false
 			def allowSpeech = allowNotif && settings?."${pName}AllowSpeechNotif" ? true : false
 			def allowAlarm = allowNotif && settings?."${pName}AllowAlarmNotif" ? true : false
@@ -3790,8 +3801,10 @@ def leakWatCheck() {
 				def rmsg = ""
 				if(!modeOff) {
 					atomicState?.leakWatRestoreMode = curMode
+					def t0 = getWetWaterSensors(leakWatSensors)
+					def wetCtDesc = t0 ? " '${t0?.join(", ")}' " : " a selected leak sensor "
 					LogAction("leakWatCheck: Saving ${leakWatTstat?.label} mode (${strCapitalize(atomicState?.leakWatRestoreMode)})", "info", true)
-					LogAction("leakWatCheck: ${wetCtDesc}${getWetWaterSensors(leakWatSensors).size() > 1 ? "are" : "is"} Wet: Turning 'OFF' '${leakWatTstat?.label}'", "debug", true)
+					LogAction("leakWatCheck: ${wetCtDesc}${t0?.size() > 1 ? "are" : "is"} Wet: Turning 'OFF' '${leakWatTstat?.label}'", "debug", true)
 					scheduleAutomationEval(60)
 					if(setTstatMode(leakWatTstat, "off", pName)) {
 						storeLastAction("Turned Off $leakWatTstat", getDtNow(), pName, leakWatTstat)
@@ -3960,7 +3973,8 @@ def nModePresenceDesc() {
 		str += "Presence Status:"
 		settings?.nModePresSensor?.sort { it?.displayName }?.each { dev ->
 			cnt = cnt+1
-			def presState = strCapitalize(dev?.currentPresence) ?: "No State"
+			def t0 = strCapitalize(dev?.currentPresence)
+			def presState = t0 ?: "No State"
 			str += "${(cnt >= 1) ? "${(cnt == cCnt) ? "\n└" : "\n├"}" : "\n└"} ${dev?.label}: ${(dev?.label?.toString()?.length() > 10) ? "\n${(cCnt == 1 || cnt == cCnt) ? "    " : "│"}└ " : ""}(${presState})"
 		}
 		return str
@@ -6970,7 +6984,8 @@ def checkFanSpeedSupport(dev) {
 	devData.each { cmd ->
 		if(cmd.name in req) { devCnt = devCnt+1 }
 	}
-	def speed = dev?.currentValue("currentState") ?: null
+	def t0 = dev?.currentValue("currentState")
+	def speed = t0 ?: null
 	//log.debug "checkFanSpeedSupport (speed: $speed | devCnt: $devCnt)"
 	return (speed && devCnt == 3) ? true : false
 }
@@ -7130,7 +7145,7 @@ def getTstatPresence(tstat) {
 
 def setTstatMode(tstat, mode, autoType=null) {
 	def result = false
-	if(mode) {
+	if(mode && tstat) {
 		def curMode = tstat?.currentnestThermostatMode?.toString()
 		if (curMode != mode) {
 			try {
@@ -7446,20 +7461,23 @@ def savetoRemDiagChild(List newdata) {
 		}
 		if(newdata?.size() > 0) {
 			def data = atomicState?.remDiagLogDataStore ?: []
+			def pdata = atomicState?.remDiagLogpDataStore ?: []
 			def cnt = 0
-			while(data && stateSz >= 70 && cnt < 50) {
+			while(data && stateSz >= 60 && cnt < 50) {
 				data.remove(0)
 				atomicState?.remDiagLogDataStore = data
 				stateSz = getStateSizePerc()
 				cnt += 1
 			}
 			newdata?.each { logItem ->
+				pdata << logItem
 				data << logItem
 				cnt -= 1
 				//log.debug "item: $logItem"
 				//def item = ["dt":getDtNow(), "type":type, "src":(logSrcType ?: "Not Set"), "msg":msg]
 			}
 			atomicState?.remDiagLogDataStore = data
+			atomicState?.remDiagLogpDataStore = pdata
 			stateSz = getStateSizePerc()
 			while(data && stateSz >= 75 && cnt < 50) {
 				data.remove(0)
@@ -7467,9 +7485,41 @@ def savetoRemDiagChild(List newdata) {
 				stateSz = getStateSizePerc()
 				cnt += 1
 			}
+			runIn(6, "displayLogData", [overwrite: true])
 			log.debug "Log Items (${data?.size()}) | State Size: (${stateSz}%)"
 		} else { log.error "bad call to savetoRemDiagChild - no data" }
 	} else { Logger("bad call to savetoRemDiagChild - wrong automation") }
+}
+
+def displayLogData() {
+		def logData = atomicState?.remDiagLogpDataStore ?: []
+		def logSz = logData?.size() ?: 0
+		def cnt = 1
+		if(logSz > 0) {
+			logData?.sort { it?.dt }.reverse()?.each { logItem ->
+				switch(logItem?.type) {
+					case "info":
+						log.info "${logItem?.src} ${logItem.msg}"
+						break
+					case "warn":
+						log.warn "${logItem?.src} ${logItem.msg}"
+						break
+					case "error":
+						log.error "${logItem?.src} ${logItem.msg}"
+						break
+					case "trace":
+						log.trace "${logItem?.src} ${logItem.msg}"
+						break
+					case "debug":
+						log.debug "${logItem?.src} ${logItem.msg}"
+						break
+					default:
+						log.debug "${logItem?.src} ${logItem.msg}"
+						break
+				}
+			}
+			atomicState?.remDiagLogpDataStore = []
+		}
 }
 
 def getRemLogData() {
@@ -7905,39 +7955,38 @@ def Logger(msg, type, logSrc=null, noSTlogger=false) {
 		}
 		if(atomicState?.debugAppendAppName) { labelstr = "${app.label} | " }
 		def themsg = "${labelstr}${msg}"
-		if(!noSTlogger) {
-			switch(type) {
-				case "debug":
-					log.debug "${themsg}"
-					break
-				case "info":
-					log.info "||| ${themsg}"
-					break
-				case "trace":
-					log.trace "| ${themsg}"
-					break
-				case "error":
-					log.error "| ${themsg}"
-					break
-				case "warn":
-					log.warn "|| ${themsg}"
-					break
-				default:
-					log.debug "${themsg}"
-					break
-			}
-		}
 		//log.debug "Logger remDiagTest: $msg | $type | $logSrc"
-		if(parent) {
+		if(atomicState?.enRemDiagLogging == null) {
+			atomicState?.enRemDiagLogging = parent?.state?.enRemDiagLogging
 			if(atomicState?.enRemDiagLogging == null) {
-				atomicState?.enRemDiagLogging = parent?.state?.enRemDiagLogging
-				if(atomicState?.enRemDiagLogging == null) {
-					atomicState?.enRemDiagLogging = false
-				}
-				//log.debug "set enRemDiagLogging to ${atomicState?.enRemDiagLogging}"
+				atomicState?.enRemDiagLogging = false
 			}
-			if(atomicState?.enRemDiagLogging) {
-				parent?.saveLogtoRemDiagStore(themsg, type, logSrc)
+			//log.debug "set enRemDiagLogging to ${atomicState?.enRemDiagLogging}"
+		}
+		if(atomicState?.enRemDiagLogging) {
+			parent?.saveLogtoRemDiagStore(themsg, type, logSrc)
+		} else {
+			if(!noSTlogger) {
+				switch(type) {
+					case "debug":
+						log.debug "${themsg}"
+						break
+					case "info":
+						log.info "||| ${themsg}"
+						break
+					case "trace":
+						log.trace "| ${themsg}"
+						break
+					case "error":
+						log.error "| ${themsg}"
+						break
+					case "warn":
+						log.warn "|| ${themsg}"
+						break
+					default:
+						log.debug "${themsg}"
+						break
+				}
 			}
 		}
 	}

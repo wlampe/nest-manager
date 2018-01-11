@@ -11,7 +11,7 @@ import java.text.SimpleDateFormat
 
 preferences { }
 
-def devVer() { return "5.3.0" }
+def devVer() { return "5.3.1" }
 
 metadata {
 	definition (name: "${textDevName()}", author: "Anthony S.", namespace: "tonesto7") {
@@ -710,29 +710,30 @@ def lastN(String input, n) {
 
 void Logger(msg, logType = "debug") {
 	def smsg = state?.showLogNamePrefix ? "${device.displayName}: ${msg}" : "${msg}"
-	switch (logType) {
-		case "trace":
-			log.trace "${smsg}"
-			break
-		case "debug":
-			log.debug "${smsg}"
-			break
-		case "info":
-			log.info "${smsg}"
-			break
-		case "warn":
-			log.warn "${smsg}"
-			break
-		case "error":
-			log.error "${smsg}"
-			break
-		default:
-			log.debug "${smsg}"
-			break
-	}
 	def theId = lastN(device.getId().toString(),5)
 	if(state?.enRemDiagLogging) {
 		parent.saveLogtoRemDiagStore(smsg, logType, "Protect-${theId}")
+	} else {
+		switch (logType) {
+			case "trace":
+				log.trace "${smsg}"
+				break
+			case "debug":
+				log.debug "${smsg}"
+				break
+			case "info":
+				log.info "${smsg}"
+				break
+			case "warn":
+				log.warn "${smsg}"
+				break
+			case "error":
+				log.error "${smsg}"
+				break
+			default:
+				log.debug "${smsg}"
+				break
+		}
 	}
 }
 
