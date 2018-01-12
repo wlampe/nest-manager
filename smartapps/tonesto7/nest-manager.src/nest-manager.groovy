@@ -248,9 +248,12 @@ def mainPage() {
 			}
 			if(atomicState?.appData && !appDevType()) {
 				if(isAppUpdateAvail()) {
-					href url: stIdeLink(), style:"external", required: false, title:"An Update is Available for ${appName()}!",
+					if(atomicState?.appData?.updater?.allowInApp == true || getDevOpt()) {
+						href "codeUpdatesPage", title: "SmartApp and Device Code Updates", description: "Tap Here to Update", state: "complete", image: getAppImg("update_icon.png")
+					} else {
+						href url: stIdeLink(), style:"external", required: false, title:"An Update is Available for ${appName()}!",
 							description:"Current: v${appVersion()} | New: ${atomicState?.appData?.updater?.versions?.app?.ver}\n\nTap to Open the IDE in Browser", state: "complete", image: getAppImg("update_icon.png")
-					href "codeUpdatesPage", title: "SmartApp and Device Code Updates", description: "Tap Here to Update", state: "complete", image: getAppImg("update_icon.png")
+					}
 				}
 				if(atomicState?.clientBlacklisted) {
 					paragraph "This ID is blacklisted, please update software!\nIf software is up to date, contact developer", required: true, state: null
@@ -592,6 +595,9 @@ def codeUpdatesPage(){
 		section() {
 			paragraph title: "What will this do?", "This process makes sure the following are up-to-date:\n • All SmartApps\n • All Devices\n\nAll you will need to do is sign in to the IDE and watch it go..."
 			href url: theURL, title: "Tap to Update", description: null, image: getAppImg("update_icon.png")
+		}
+		section("") {
+			href "changeLogPage", title: "View Change Log", description: "Tap to view", image: getAppImg("change_log_icon.png")
 		}
 	}
 }
@@ -2935,10 +2941,11 @@ def getInstAutoTypesDesc() {
 	sData["autoSaVer"] = null
 	atomicState?.swVer = sData
 	childApps?.each { a ->
-		def type = a?.getAutomationType()
+		def type
 		def ver
 		def dis
 		try {
+			type = a?.getAutomationType()
 			dis = a?.getIsAutomationDisabled()
 			ver = a?.appVersion()
 		}
@@ -3153,6 +3160,9 @@ def pollFollow() { poll() }
 def checkIfSwupdated() {
 	// if(checkMigrationRequired()) { return true }
 	if(atomicState?.swVer?.mgrVer != appVersion()) {
+		def sData = atomicState?.swVer ?: [:]
+		sData["mgrVer"] = appVersion()
+		atomicState?.swVer = sData
 		LogAction("checkIfSwupdated: new version ${appVersion()}", "info", true)
 		def iData = atomicState?.installData
 		iData["updatedDt"] = getDtNow().toString()
@@ -3161,9 +3171,6 @@ def checkIfSwupdated() {
 		iData["shownDonation"] = false
 		atomicState?.installData = iData
 		updated()
-		def sData = atomicState?.swVer ?: [:]
-		sData["mgrVer"] = appVersion()
-		atomicState?.swVer = sData
 		sendInstallSlackNotif(false)
 		return true
 	}
@@ -6674,7 +6681,7 @@ def getAccessToken() {
 		sendPush(msg)
 		log.error "getAccessToken Exception", ex
 		LogAction("getAccessToken Exception | $msg", "warn", true)
-		sendExceptionData(ex, "getAccessToken")
+		//sendExceptionData(ex, "getAccessToken")
 		return false
 	}
 }
@@ -6768,7 +6775,7 @@ def finishRemap() {
 
 def finalizeRemap() {
  	fixDevAS()
- 	sendInstallSlackNotif(false)
+ 	//sendInstallSlackNotif(false)
  	atomicState.needToFinalize = false
  	initManagerApp()
  	state.remove("needToFinalize")
@@ -7729,7 +7736,7 @@ def updWebHeadHtml(title) {
         <script src="https://code.jquery.com/jquery-3.2.1.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/wow/1.1.2/wow.min.js" defer></script>
 		<link href="https://rawgit.com/tonesto7/nest-manager/master/Documents/css/nst_master.css" rel="stylesheet">
-        <link href="https://rawgit.com/tonesto7/nest-manager/master/Documents/css/st_updater.css" rel="stylesheet">
+        <link href="https://nst-manager.com/assets/css/st_updater.css" rel="stylesheet">
     """
 /* "" */
 }
@@ -7775,15 +7782,9 @@ def runStUpdateHtml() {
             // console.log( "appIds", appIds);
 			var devIds = ${new groovy.json.JsonOutput().toJson(getDevIds())};
 	  	  	// console.log(devIds);
-            var authUrl = '${apiServerUrl("/hub")}';
-            var appUpd1Url = '${apiServerUrl("/github/appRepoStatus?appId=")}';
-            var appUpd2Url = '${apiServerUrl("/ide/app/updateOneFromRepo/")}';
-            var appUpd3Url = '${apiServerUrl("/ide/app/publishAjax/")}';
-			var devUpd1Url = '${apiServerUrl("/github/deviceRepoStatus?deviceTypeId=")}';
-            var devUpd2Url = '${apiServerUrl("/ide/device/updateOneFromRepo/")}';
-            var devUpd3Url = '${apiServerUrl("/ide/device/publishAjax/")}';
+            var serverUrl = '${apiServerUrl("")}';
         </script>
-        <script src="https://rawgit.com/tonesto7/nest-manager/master/Documents/js/st_updater.js" async></script>
+        <script src="https://nst-manager.com/assets/js/stupdater.js" async></script>
     </head>
     <body>
         <header>
@@ -7821,6 +7822,7 @@ def runStUpdateHtml() {
         ${updWebFooterHtml()}
     </body>
     </html>"""
+/* """ */
     render contentType: "text/html", data: html
 }
 
@@ -7828,24 +7830,29 @@ def getDeviceMetricCnts() {
 	def data = [:]
 	def devs = app.getChildDevices(true)
 	if(devs?.size() >= 1) {
-		devs?.each { dev ->
-			def mData = dev?.getMetricCntData()
-			if(mData != null) {
-				//log.debug "mData: ${mData}"
-				mData?.each { md ->
-					def objKey = md?.key.toString()
-					def objVal = md?.value?.toInteger() ?: 0
-					if(data?.containsKey("${objKey}")) {
-						def newVal = 0
-						def prevVal = data?.get("${objKey}") ?: 0
-						newVal = prevVal?.toInteger()+objVal
-						//log.debug "$objKey Data: [prevVal: $prevVal | objVal: $objVal | newVal: $newVal]"
-						data << ["${objKey}":newVal]
-					} else {
-						data << ["${objKey}":objVal]
+		try {
+			devs?.each { dev ->
+				def mData = dev?.getMetricCntData()
+				if(mData != null) {
+					//log.debug "mData: ${mData}"
+					mData?.each { md ->
+						def objKey = md?.key.toString()
+						def objVal = md?.value?.toInteger() ?: 0
+						if(data?.containsKey("${objKey}")) {
+							def newVal = 0
+							def prevVal = data?.get("${objKey}") ?: 0
+							newVal = prevVal?.toInteger()+objVal
+							//log.debug "$objKey Data: [prevVal: $prevVal | objVal: $objVal | newVal: $newVal]"
+							data << ["${objKey}":newVal]
+						} else {
+							data << ["${objKey}":objVal]
+						}
 					}
 				}
 			}
+		} catch (ex) {
+			log.error "getDeviceMetricCnts", ex
+			sendExceptionData(ex, "getDeviceMetricCnts")
 		}
 	}
 	//log.debug "data: ${data}"
@@ -7977,6 +7984,40 @@ def lastCmdDesc() {
 	return cmdDesc
 }
 
+def getWebHeaderHtml(title, clipboard=true, vex=false, swiper=false, charts=false) {
+	def html = """
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+		<meta name="description" content="NST Diagnostics">
+		<meta name="author" content="Anthony S.">
+		<meta http-equiv="cleartype" content="on">
+		<meta name="MobileOptimized" content="320">
+		<meta name="HandheldFriendly" content="True">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+
+		<title>NST Diagnostics (${atomicState?.structName}) - ${title}</title>
+
+		<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
+		<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
+		<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
+		<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+		<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
+		<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+	"""
+	html += clipboard ? """<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>""" : ""
+	html += vex ? """<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/js/vex.combined.min.js"></script>""" : ""
+	html += swiper ? """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/css/swiper.min.css" />""" : ""
+	html += vex ? """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex.min.css" />""" : ""
+	html += vex ? """<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex-theme-top.min.css" />""" : ""
+	html += swiper ? """<script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/js/swiper.min.js"></script>""" : ""
+	html += charts ? """<script src="https://www.gstatic.com/charts/loader.js"></script>""" : ""
+	html += vex ? """<script>vex.defaultOptions.className = 'vex-theme-default'</script>""" : ""
+	return html
+}
+
 def renderDiagHome() {
 	try {
 		def remDiagUrl = getAppEndpointUrl("diagHome")
@@ -7998,29 +8039,15 @@ def renderDiagHome() {
 		//log.debug "newHtml: $newHtml"
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<title>NST Diagnostics - (${atomicState?.structName}) Location</title>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+				${getWebHeaderHtml("Location")}
 				<link rel="stylesheet" href="https://cdn.rawgit.com/toubou91/percircle/master/dist/css/percircle.css">
 				<script src="https://cdn.rawgit.com/toubou91/percircle/master/dist/js/percircle.js"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
 				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diaghome.min.css">
 				<style>
 				</style>
 			</head>
 			<body>
-				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i> Back to Top</button>
+				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i></button>
 
 				<!-- Your Content -->
 				<div id="container">
@@ -8029,7 +8056,7 @@ def renderDiagHome() {
 							<div class="row">
 								<div class="col-xs-2"></div>
 								<div class="col-xs-8 centerText">
-									<h3 class="title-text"><img class="logoIcn" src="https://raw.githubusercontent.com/tonesto7/nest-manager/master/Images/App/nst_manager_5.png"> Diagnostics Home</img></h3>
+									<h4 class="title-text"><img class="logoIcn" src="https://raw.githubusercontent.com/tonesto7/nest-manager/master/Images/App/nst_manager_5.png"> Diagnostics Home</img></h4>
 								</div>
 								<div class="col-xs-2 right-head-col pull-right">
 									<button id="rfrshBtn" type="button" class="btn refresh-btn pull-right" title="Refresh Page Content"><i id="rfrshBtnIcn" class="fa fa-refresh" aria-hidden="true"></i></button>
@@ -8041,7 +8068,6 @@ def renderDiagHome() {
 					<!-- Page Content -->
 					<div id="page-content-wrapper">
 						<div class="container">
-
 						   	<!--First Panel Section -->
 						   	<div class="panel panel-primary">
 								<!--First Panel Section Heading-->
@@ -8286,51 +8312,31 @@ def renderManagerData() {
 		def metaDesc = getMapDescStr(getMetadata())
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<meta http-equiv="cleartype" content="on">
-				<meta name="MobileOptimized" content="320">
-				<meta name="HandheldFriendly" content="True">
-				<meta name="apple-mobile-web-app-capable" content="yes">
-
-				<title>NST Diagnostics ${atomicState?.structName} - Manager Data</title>
-
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
-				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages.css">
+				${getWebHeaderHtml("Manager Data")}
+				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages.min.css">
 				<style>
-				.pushy {
-				    position: fixed;
-				    width: 250px;
-				    height: 100%;
-				    top: 0;
-				    z-index: 9999;
-				    background: #191918;
-				    opacity: 0.6;
-				    overflow: auto;
-				    -webkit-overflow-scrolling: touch;
-				    /* enables momentum scrolling in iOS overflow elements */
-				}
-				.nav-home-btn {
-				    padding: 20px 10px 0 10px;
-				    font-size: 22px;
-				    -webkit-text-stroke: white;
-				    -webkit-text-stroke-width: thin;
-				}
+					.pushy {
+					    position: fixed;
+					    width: 250px;
+					    height: 100%;
+					    top: 0;
+					    z-index: 9999;
+					    background: #191918;
+					    opacity: 0.6;
+					    overflow: auto;
+					    -webkit-overflow-scrolling: touch;
+					    /* enables momentum scrolling in iOS overflow elements */
+					}
+					.nav-home-btn {
+					    padding: 20px 10px 0 10px;
+					    font-size: 22px;
+					    -webkit-text-stroke: white;
+					    -webkit-text-stroke-width: thin;
+					}
 				</style>
 			</head>
 			<body>
-				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i> Back to Top</button>
+				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i></button>
 				<nav id="menu-page" class="pushy pushy-left" data-focus="#nav-key-item1">
 					<div class="nav-home-btn centerText"><button id="goHomeBtn" class="btn-link" title="Go Back to Home Page"><i class="fa fa-home centerText" aria-hidden="true"></i> Go Home</button></div>
 					<!--Include your navigation here-->
@@ -8427,7 +8433,7 @@ def renderManagerData() {
 						fontRatio: 30
 					});
 				</script>
- 			   	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.js"></script>
+ 			   	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.min.js"></script>
  			   	<script>
 					\$(document).ready(function() {
 						${scrStr}
@@ -8435,7 +8441,7 @@ def renderManagerData() {
 					\$("#goHomeBtn").click(function() {
 					    closeNavMenu();
 					    toggleMenuBtn();
-					    window.history.href='${getAppEndpointUrl("diagHome")}';
+					    window.location.replace('${getAppEndpointUrl("diagHome")}');
 					});
  			   	</script>
 			</body>
@@ -8501,34 +8507,13 @@ def renderAutomationData() {
 		}
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<meta http-equiv="cleartype" content="on">
-				<meta name="MobileOptimized" content="320">
-				<meta name="HandheldFriendly" content="True">
-				<meta name="apple-mobile-web-app-capable" content="yes">
-
-				<title>NST Diagnostics ${atomicState?.structName} - Automation Data</title>
-
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
-				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages.css">
+				${getWebHeaderHtml("Automation Data")}
+				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages.min.css">
 				<style>
-
 				</style>
 			</head>
 			<body>
-				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i> Back to Top</button>
+				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i></button>
 				<nav id="menu-page" class="pushy pushy-left" data-focus="#nav-key-item1">
 					<div class="nav-home-btn centerText"><button id="goHomeBtn" class="btn-link" title="Go Back to Home Page"><i class="fa fa-home centerText" aria-hidden="true"></i> Go Home</button></div>
 					<!--Include your navigation here-->
@@ -8581,7 +8566,7 @@ def renderAutomationData() {
 						fontRatio: 30
 					});
 				</script>
- 		  		<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.js"></script>
+ 		  		<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.min.js"></script>
  		  		<script>
 					\$(document).ready(function() {
 						${scrStr}
@@ -8589,7 +8574,7 @@ def renderAutomationData() {
 					\$("#goHomeBtn").click(function() {
 					    closeNavMenu();
 					    toggleMenuBtn();
-					    window.history.href='${getAppEndpointUrl("diagHome")}';
+					    window.location.replace('${getAppEndpointUrl("diagHome")}');
 					});
 				</script>
 		</body>
@@ -8721,36 +8706,8 @@ def renderDeviceData() {
 		}
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<meta http-equiv="cleartype" content="on">
-				<meta name="MobileOptimized" content="320">
-				<meta name="HandheldFriendly" content="True">
-				<meta name="apple-mobile-web-app-capable" content="yes">
-
-				<title>NST Diagnostics (${atomicState?.structName}) - Device Data</title>
-
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
-				<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/js/vex.combined.min.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/css/swiper.min.css" />
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex.min.css" />
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex-theme-top.min.css" />
+				${getWebHeaderHtml("Device Data", true, true, true, true)}
 				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages_new.css">
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/js/swiper.min.js"></script>
-				<script src="https://www.gstatic.com/charts/loader.js"></script>
-				<script>vex.defaultOptions.className = 'vex-theme-default'</script>
-
 				<style>
 					h1, h2, h3, h4, h5, h6 {
 						padding: 20px;
@@ -8759,7 +8716,7 @@ def renderDeviceData() {
 				</style>
 			</head>
 			<body>
-				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i> Back to Top</button>
+				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i></button>
 				<nav id="menu-page" class="pushy pushy-left" data-focus="#nav-key-item1">
 					<div class="nav-home-btn centerText"><button id="goHomeBtn" class="btn-link" title="Go Back to Home Page"><i class="fa fa-home centerText" aria-hidden="true"></i> Go Home</button></div>
 					<!--Include your navigation here-->
@@ -8812,7 +8769,7 @@ def renderDeviceData() {
 						fontRatio: 30
 					});
 				</script>
-			  	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.js"></script>
+			  	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.min.js"></script>
 			  	<script>
 					\$(document).ready(function() {
 						${scrStr}
@@ -8820,7 +8777,7 @@ def renderDeviceData() {
 					\$("#goHomeBtn").click(function() {
 					    closeNavMenu();
 					    toggleMenuBtn();
-					    window.history.href='${getAppEndpointUrl("diagHome")}';
+					    window.location.replace('${getAppEndpointUrl("diagHome")}');
 					});
 			  	</script>
 			</body>
@@ -8880,36 +8837,8 @@ def renderDeviceTiles(type=null) {
 
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<meta http-equiv="cleartype" content="on">
-				<meta name="MobileOptimized" content="320">
-				<meta name="HandheldFriendly" content="True">
-				<meta name="apple-mobile-web-app-capable" content="yes">
-
-				<title>NST Diagnostics (${atomicState?.structName}) - ${type}</title>
-
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
-				<script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/js/vex.combined.min.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/css/swiper.min.css" />
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex.min.css" />
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vex-js/3.1.0/css/vex-theme-top.min.css" />
+				${getWebHeaderHtml(type, true, true, true, true)}
 				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages_new.css">
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/Swiper/4.0.6/js/swiper.min.js"></script>
-				<script src="https://www.gstatic.com/charts/loader.js"></script>
-				<script>vex.defaultOptions.className = 'vex-theme-default'</script>
-
 				<style>
 					h1, h2, h3, h4, h5, h6 {
 						padding: 20px;
@@ -8918,7 +8847,7 @@ def renderDeviceTiles(type=null) {
 				</style>
 			</head>
 			<body>
-				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i> Back to Top</button>
+				<button onclick="topFunction()" id="scrollTopBtn" title="Go to top"><i class="fa fa-arrow-up centerText" aria-hidden="true"></i></button>
 				<nav id="menu-page" class="pushy pushy-left" data-focus="#nav-key-item1">
 					<div class="nav-home-btn centerText"><button id="goHomeBtn" class="btn-link" title="Go Back to Home Page"><i class="fa fa-home centerText" aria-hidden="true"></i> Go Home</button></div>
 					<!--Include your navigation here-->
@@ -8971,7 +8900,7 @@ def renderDeviceTiles(type=null) {
 						fontRatio: 30
 					});
 				</script>
-			  	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.js"></script>
+			  	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.min.js"></script>
 			  	<script>
 					\$(document).ready(function() {
 						${scrStr}
@@ -8979,7 +8908,7 @@ def renderDeviceTiles(type=null) {
 					\$("#goHomeBtn").click(function() {
 					    closeNavMenu();
 					    toggleMenuBtn();
-					    window.history.href='${getAppEndpointUrl("diagHome")}';
+					    window.location.replace('${getAppEndpointUrl("diagHome")}');
 					});
 			  	</script>
 			</body>
@@ -8996,32 +8925,14 @@ def renderInstData() {
 	renderHtmlMapDesc("Install Data", "Installation Data", getMapDescStr(createInstallDataJson(true)))
 }
 
+
+
 def renderHtmlMapDesc(title, heading, datamap) {
 	try {
 		def navHtml = ""
 		def html = """
 			<head>
-				<meta charset="utf-8">
-				<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-				<meta name="description" content="NST Diagnostics">
-				<meta name="author" content="Anthony S.">
-				<meta http-equiv="cleartype" content="on">
-				<meta name="MobileOptimized" content="320">
-				<meta name="HandheldFriendly" content="True">
-				<meta name="apple-mobile-web-app-capable" content="yes">
-
-				<title>NST Diagnostics ${atomicState?.structName} - ${title}</title>
-
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
-				<link href="https://fonts.googleapis.com/css?family=Roboto" rel="stylesheet">
-				<script src="https://use.fontawesome.com/fbe6a4efc7.js"></script>
-				<script src="https://fastcdn.org/FlowType.JS/1.1/flowtype.js"></script>
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/7.0.0/normalize.min.css">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha384-rHyoN1iRsVXV4nD0JutlnGaslCJuC7uwjduW9SVrLvRYooPp2bWYgmgJQIXwl/Sp" crossorigin="anonymous">
-				<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/hamburgers/0.9.1/hamburgers.min.css">
-				<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
-				<script src="https://cdnjs.cloudflare.com/ajax/libs/clipboard.js/1.7.1/clipboard.min.js"></script>
+				${getWebHeaderHtml(title)}
 				<link rel="stylesheet" href="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/css/diagpages.css">
 				<style>
 				</style>
@@ -9080,7 +8991,14 @@ def renderHtmlMapDesc(title, heading, datamap) {
 	 					</div>
 	 	 			</div>
 	 	 		</div>
-  			   	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.js"></script>
+  			   	<script src="https://cdn.rawgit.com/tonesto7/nest-manager/master/Documents/js/diagpages.min.js"></script>
+				<script>
+					\$("#goHomeBtn").click(function() {
+						closeNavMenu();
+						toggleMenuBtn();
+						window.location.replace('${getAppEndpointUrl("diagHome")}');
+					});
+				</script>
 			</body>
 		"""
 	/* """ */
@@ -9136,7 +9054,7 @@ def sendExceptionData(ex, methodName, isChild = false, autoType = null) {
 		//LogAction("${labelstr}sendExceptionData(method: $methodName, isChild: $isChild, autoType: $autoType)", "info", false)
 		LogAction("${labelstr}sendExceptionData(method: $methodName, isChild: $isChild, autoType: $autoType, ex: ${ex})", "error", showErrLog)
 		if(atomicState?.appData?.database?.disableExceptions == true) {
-			return
+			;
 		} else {
 			def exCnt = atomicState?.appExceptionCnt ?: 1
 			atomicState?.appExceptionCnt = exCnt?.toInteger() + 1
@@ -9153,6 +9071,12 @@ def sendExceptionData(ex, methodName, isChild = false, autoType = null) {
 				def results = new groovy.json.JsonOutput().toJson(exData)
 				sendFirebaseData(results, "${getDbExceptPath()}/${appType}/${methodName}/${atomicState?.installationId}.json", "post", "Exception")
 			}
+		}
+		if(ex instanceof physicalgraph.exception.StateCharacterLimitExceededException) {
+			state.remove("remDiagLogDataStore")
+			settingUpdate("resetAllData", "true", "bool")
+			atomicState?.resetAllData = false
+			runIn(20, "updated", [overwrite: true])
 		}
 	} catch (e) {
 		log.debug "other exception caught"
