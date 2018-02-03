@@ -13,7 +13,7 @@ import groovy.time.TimeCategory
 
 preferences { }
 
-def devVer() { return "5.3.2" }
+def devVer() { return "5.3.3" }
 
 metadata {
 	definition (name: "${textDevName()}", author: "Anthony S.", namespace: "tonesto7") {
@@ -57,6 +57,7 @@ metadata {
 		attribute "debugOn", "string"
 		attribute "devTypeVer", "string"
 		attribute "onlineStatus", "string"
+		attribute "securityState", "string"
 	}
 
 	simulator { }
@@ -125,7 +126,7 @@ metadata {
 			state("default", label: 'Reminder:\nHTML Content is Available in SmartApp')
 		}
 		main "isStreamingStatus"
-		details(["videoPlayer", "isStreaming", "take", "refresh", "devCamHtml", "cameraDetails", "motion", "sound", "remind" ])
+		details(["videoPlayer", "isStreaming", "take", "refresh", "cameraDetails", "motion", "sound", "remind" ])
 
 	}
 	preferences {
@@ -149,6 +150,7 @@ def initialize() {
 	if (!state.updatedLastRanAt || now() >= state.updatedLastRanAt + 2000) {
 		state.updatedLastRanAt = now()
 		verifyHC()
+		state?.isInstalled = true
 	} else {
 		log.trace "initialize(): Ran within last 2 seconds - SKIPPING"
 	}
@@ -156,15 +158,14 @@ def initialize() {
 
 void installed() {
 	Logger("installed...")
-	initialize()
-	state?.isInstalled = true
+	runIn(5, "initialize", [overwrite: true] )
 	state?.shownChgLog = true
-	runIn(15, "refresh")
+	runIn(15, "refresh", [overwrite: true])
 }
 
 void updated() {
 	Logger("updated...")
-	initialize()
+	runIn(5, "initialize", [overwrite: true] )
 }
 
 def useTrackedHealth() { return state?.useTrackedHealth ?: false }
@@ -300,6 +301,7 @@ def processEvent() {
 			publicShareUrlEvent(results?.public_share_url)
 			onlineStatusEvent(results?.is_online?.toString())
 			isStreamingEvent(results?.is_streaming)
+			securityStateEvent(eventData?.secState)
 			publicShareEnabledEvent(results?.is_public_share_enabled?.toString())
 			videoHistEnabledEvent(results?.is_video_history_enabled?.toString())
 			if(results?.last_is_online_change) { lastOnlineEvent(results?.last_is_online_change?.toString()) }
@@ -451,6 +453,16 @@ def onlineStatusEvent(isOnline) {
 		sendEvent(name: "onlineStatus", value: onlineStat.toString(), descriptionText: "Online Status is: ${onlineStat}", displayed: true, isStateChange: true, state: onlineStat)
 		addCheckinReason("onlineStatusChange")
 	} else { LogAction("Online Status is: (${onlineStat}) | Original State: (${prevOnlineStat})") }
+}
+
+def securityStateEvent(sec) {
+	def val = ""
+	def oldState = device.currentState("securityState")?.value
+	if(sec) { val = sec }
+	if(isStateChange(device, "securityState", val.toString())) {
+		Logger("UPDATED | Security State is (${val}) | Original State: (${oldState})")
+		sendEvent(name: "securityState", value: val, descriptionText: "Location Security State is: ${val}", displayed: true, isStateChange: true, state: val)
+	} else { LogAction("Location Security State is: (${val}) | Original State: (${oldState})") }
 }
 
 def isStreamingEvent(isStreaming, override=false) {
